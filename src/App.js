@@ -1,7 +1,7 @@
-import PriceCompareIndia from './PriceCompareIndia';
+import PriceCompareIndiaDemo from './PriceCompareIndiaDemo';
 
 function App() {
-  return <PriceCompareIndia />;
+  return <PriceCompareIndiaDemo />;
 }
 
 export default App;
