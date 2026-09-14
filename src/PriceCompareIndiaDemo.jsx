@@ -43,12 +43,7 @@ function formatINR(n) {
   return "₹" + n.toLocaleString("en-IN");
 }
 
-// Unsplash's keyword-based endpoint returns a real, relevant photo
-// for a search term with no API key required — good enough for a
-// visual mockup, not a real product-catalog image.
-function imageFor(term) {
-  return `https://source.unsplash.com/400x300/?${encodeURIComponent(term)}`;
-}
+
 
 export default function PriceCompareIndiaDemo() {
   const [query, setQuery] = useState("");
