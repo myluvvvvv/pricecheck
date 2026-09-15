@@ -1,163 +1,82 @@
-import React, { useState } from "react";
-import { Search, ExternalLink, X, Home, Link2, Check, Pencil } from "lucide-react";
+import React, { useState, useCallback } from "react";
+import { Search, ExternalLink, X, Info, Loader2, AlertCircle } from "lucide-react";
 
-const RETAILERS = [
-  {
-    name: "Amazon.in",
-    color: "#FF9900",
-    home: "https://www.amazon.in",
-    url: (q) => `https://www.amazon.in/s?k=${encodeURIComponent(q)}`,
-  },
-  {
-    name: "Flipkart",
-    color: "#2874F0",
-    home: "https://www.flipkart.com",
-    url: (q) => `https://www.flipkart.com/search?q=${encodeURIComponent(q)}`,
-  },
-  {
-    name: "Myntra",
-    color: "#FF3F6C",
-    home: "https://www.myntra.com",
-    url: (q) => `https://www.myntra.com/${encodeURIComponent(q.trim().replace(/\s+/g, "-"))}`,
-  },
-  {
-    name: "Ajio",
-    color: "#D4AF37",
-    home: "https://www.ajio.com",
-    url: (q) => `https://www.ajio.com/search/?text=${encodeURIComponent(q)}`,
-  },
-  {
-    name: "Croma",
-    color: "#00A19C",
-    home: "https://www.croma.com",
-    url: (q) =>
-      `https://www.croma.com/searchB?q=${encodeURIComponent(q)}%3Arelevance&text=${encodeURIComponent(q)}`,
-  },
-  {
-    name: "Reliance Digital",
-    color: "#E4002B",
-    home: "https://www.reliancedigital.in",
-    url: (q) => `https://www.reliancedigital.in/search?q=${encodeURIComponent(q)}`,
-  },
-  {
-    name: "BigBasket",
-    color: "#84C225",
-    home: "https://www.bigbasket.com",
-    url: (q) => `https://www.bigbasket.com/ps/?q=${encodeURIComponent(q)}`,
-  },
-  {
-    name: "Tata Cliq",
-    color: "#E90C8B",
-    home: "https://www.tatacliq.com",
-    url: (q) => `https://www.tatacliq.com/search/?searchCategory=all&text=${encodeURIComponent(q)}`,
-  },
-  {
-    name: "Nykaa",
-    color: "#FC2779",
-    home: "https://www.nykaa.com",
-    url: (q) => `https://www.nykaa.com/search/result/?q=${encodeURIComponent(q)}`,
-  },
-  {
-    name: "Snapdeal",
-    color: "#E40046",
-    home: "https://www.snapdeal.com",
-    url: (q) => `https://www.snapdeal.com/search?keyword=${encodeURIComponent(q)}`,
-  },
-];
+// Where the price proxy lives. In dev, CRA's "proxy" field in package.json
+// forwards /api to localhost:3001; in production set REACT_APP_PRICE_API
+// to your deployed server's URL.
+const API_BASE = process.env.REACT_APP_PRICE_API || "";
 
-const POPULAR_SEARCHES = [
+// Brand colours for stores we recognise. Anything else gets the neutral dot.
+const STORE_COLORS = {
+  "Amazon.in": "#FF9900",
+  Flipkart: "#2874F0",
+  Myntra: "#FF3F6C",
+  Ajio: "#D4AF37",
+  Croma: "#00A19C",
+  "Reliance Digital": "#E4002B",
+  "Tata CLiQ": "#C4161C",
+  "Vijay Sales": "#0B4DA2",
+  JioMart: "#0A6FB8",
+  Nykaa: "#FC2779",
+};
+
+const POPULAR_SEARCHES = [  
   "wireless headphones",
   "running shoes",
   "air fryer",
   "smartwatch",
   "backpack",
-  "coffee",
   "mixer grinder",
-  "laptop",
-  "office chair",
-  "bluetooth speaker",
-  "yoga mat",
-  "electric kettle",
 ];
 
 let nextId = 1;
 
-function isValidUrl(value) {
-  try {
-    const u = new URL(value.trim());
-    return u.protocol === "http:" || u.protocol === "https:";
-  } catch {
-    return false;
-  }
+function formatINR(n) {
+  return "₹" + Math.round(n).toLocaleString("en-IN");
 }
 
 export default function PriceCompareIndia() {
   const [query, setQuery] = useState("");
-  // Every search a person runs gets appended here — no cap, so
-  // comparing 10+ products in one session just means a longer list.
-  // Each entry can also carry pasted exact-product links per retailer.
   const [searches, setSearches] = useState([]);
-  const [editingKey, setEditingKey] = useState(null); // `${searchId}:${retailerName}`
-  const [editingValue, setEditingValue] = useState("");
+
+  const patchSearch = useCallback((id, patch) => {
+    setSearches((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+  }, []);
+
+  const runSearch = useCallback(
+    async (id, term) => {
+      patchSearch(id, { status: "loading", error: null });
+      try {
+        const res = await fetch(`${API_BASE}/api/prices?q=${encodeURIComponent(term)}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+        patchSearch(id, {
+          status: "done",
+          results: data.results || [],
+          image: data.image || null,
+          cached: data.cached,
+        });
+      } catch (err) {
+        patchSearch(id, { status: "error", error: err.message });
+      }
+    },
+    [patchSearch]
+  );
 
   function handleSearch(term) {
     const clean = term.trim();
     if (!clean) return;
-    setSearches((prev) => [{ id: nextId++, term: clean, links: {} }, ...prev]);
+    const id = nextId++;
+    setSearches((prev) => [
+      { id, term: clean, status: "loading", results: [], image: null, error: null },
+      ...prev,
+    ]);
     setQuery("");
+    runSearch(id, clean);
   }
 
   function removeSearch(id) {
     setSearches((prev) => prev.filter((s) => s.id !== id));
-    if (editingKey && editingKey.startsWith(`${id}:`)) {
-      setEditingKey(null);
-      setEditingValue("");
-    }
-  }
-
-  function clearAll() {
-    setSearches([]);
-    setEditingKey(null);
-    setEditingValue("");
-  }
-
-  function startEditing(searchId, retailerName, currentValue) {
-    setEditingKey(`${searchId}:${retailerName}`);
-    setEditingValue(currentValue || "");
-  }
-
-  function cancelEditing() {
-    setEditingKey(null);
-    setEditingValue("");
-  }
-
-  function saveLink(searchId, retailerName) {
-    const clean = editingValue.trim();
-    setSearches((prev) =>
-      prev.map((s) => {
-        if (s.id !== searchId) return s;
-        const links = { ...s.links };
-        if (clean && isValidUrl(clean)) {
-          links[retailerName] = clean;
-        } else {
-          delete links[retailerName];
-        }
-        return { ...s, links };
-      })
-    );
-    setEditingKey(null);
-    setEditingValue("");
-  }
-
-  function removeLink(searchId, retailerName) {
-    setSearches((prev) =>
-      prev.map((s) => {
-        if (s.id !== searchId) return s;
-        const links = { ...s.links };
-        delete links[retailerName];
-        return { ...s, links };
-      })
-    );
   }
 
   return (
@@ -168,22 +87,24 @@ export default function PriceCompareIndia() {
         input::placeholder { color: #AFAFAF; }
         .chip:hover { background: #F5F5F5; }
         .storeCard:hover { border-color: #C7C7C7; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
-        .homeLink:hover { border-color: #C7C7C7; }
         .searchBtn:hover { background: #000000; }
+        .searchBtn:disabled { background: #C7C7C7; cursor: default; }
         .removeBtn:hover { background: #F0F0F0; }
-        .clearBtn:hover { color: #1A1A1A; }
-        .editBtn:hover { background: #F0F0F0; }
-        .saveBtn:hover { background: #000000; }
-        .linkRemoveBtn:hover { color: #C0392B; }
+        .retryBtn:hover { background: #F5F5F5; }
+        .spin { animation: spin 0.9s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @media (prefers-reduced-motion: reduce) { .spin { animation-duration: 3s; } }
+        :focus-visible { outline: 2px solid #1A1A1A; outline-offset: 2px; }
       `}</style>
 
       <header style={styles.header}>
         <div style={styles.headerInner}>
           <span style={styles.logo}>PriceCheck India</span>
-          <span style={styles.headerSub}>
-            Search any product to open live results across {RETAILERS.length} Indian retailers. Found the exact
-            listing you want? Paste its link in and this becomes your watchlist.
-          </span>
+          <div style={styles.sourceBanner}>
+            <Info size={13} />
+            Prices come from Google Shopping listings via SerpAPI and can lag the retailer by a few
+            minutes. Check the store page before you buy.
+          </div>
         </div>
       </header>
 
@@ -199,174 +120,117 @@ export default function PriceCompareIndia() {
               onKeyDown={(e) => e.key === "Enter" && handleSearch(query)}
             />
           </div>
-          <button className="searchBtn" style={styles.searchBtn} onClick={() => handleSearch(query)}>
+          <button
+            className="searchBtn"
+            style={styles.searchBtn}
+            onClick={() => handleSearch(query)}
+            disabled={!query.trim()}
+          >
             Search
           </button>
         </div>
 
-        <div style={styles.popularWrap}>
-          <div style={styles.popularLabel}>Popular searches</div>
-          <div style={styles.chips}>
-            {POPULAR_SEARCHES.map((term) => (
-              <button
-                key={term}
-                className="chip"
-                style={styles.chip}
-                onClick={() => handleSearch(term)}
-              >
-                {term}
-              </button>
-            ))}
-          </div>
-        </div>
-
         {searches.length === 0 && (
-          <div style={styles.homesWrap}>
-            <div style={styles.popularLabel}>Or just browse a store directly</div>
-            <div style={styles.homeGrid}>
-              {RETAILERS.map((r) => (
-                <a
-                  key={r.name}
-                  className="homeLink"
-                  style={styles.homeLink}
-                  href={r.home}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <span style={{ ...styles.storeDot, background: r.color }} />
-                  <span style={styles.storeName}>{r.name}</span>
-                  <Home size={14} color="#9A9A9A" />
-                </a>
+          <div style={styles.popularWrap}>
+            <div style={styles.popularLabel}>Popular searches</div>
+            <div style={styles.chips}>
+              {POPULAR_SEARCHES.map((term) => (
+                <button key={term} className="chip" style={styles.chip} onClick={() => handleSearch(term)}>
+                  {term}
+                </button>
               ))}
             </div>
           </div>
         )}
 
-        {searches.length > 0 && (
-          <div style={styles.resultsWrap}>
-            <div style={styles.resultsTopBar}>
-              <span style={styles.resultsCount}>
-                {searches.length} product{searches.length === 1 ? "" : "s"} being compared
-              </span>
-              <button className="clearBtn" style={styles.clearBtn} onClick={clearAll}>
-                Clear all
-              </button>
-            </div>
+        {searches.map((s) => {
+          const lowest = s.results.length ? s.results[0].price : null;
 
-            {searches.map((s) => (
-              <div key={s.id} style={styles.resultBlock}>
-                <div style={styles.resultHeader}>
-                  <span>
-                    Results for <span style={{ fontWeight: 700 }}>&ldquo;{s.term}&rdquo;</span>
-                  </span>
-                  <button
-                    className="removeBtn"
-                    style={styles.removeBtn}
-                    onClick={() => removeSearch(s.id)}
-                    aria-label={`Remove ${s.term}`}
-                  >
-                    <X size={14} color="#9A9A9A" />
+          return (
+            <div key={s.id} style={styles.resultBlock}>
+              <div style={styles.resultHeader}>
+                <span>
+                  Results for <span style={{ fontWeight: 700 }}>&ldquo;{s.term}&rdquo;</span>
+                </span>
+                <button
+                  className="removeBtn"
+                  style={styles.removeBtn}
+                  onClick={() => removeSearch(s.id)}
+                  aria-label={`Remove ${s.term}`}
+                >
+                  <X size={14} color="#9A9A9A" />
+                </button>
+              </div>
+
+              {s.status === "loading" && (
+                <div style={styles.stateBox} role="status">
+                  <Loader2 className="spin" size={16} color="#9A9A9A" />
+                  Checking stores
+                </div>
+              )}
+
+              {s.status === "error" && (
+                <div style={{ ...styles.stateBox, ...styles.errorBox }}>
+                  <AlertCircle size={16} color="#C0392B" />
+                  <span style={{ flex: 1 }}>{s.error}</span>
+                  <button className="retryBtn" style={styles.retryBtn} onClick={() => runSearch(s.id, s.term)}>
+                    Try again
                   </button>
                 </div>
+              )}
 
-                <div style={styles.storeGrid}>
-                  {RETAILERS.map((r) => {
-                    const exactLink = s.links[r.name];
-                    const key = `${s.id}:${r.name}`;
-                    const isEditing = editingKey === key;
+              {s.status === "done" && s.results.length === 0 && (
+                <div style={styles.stateBox}>
+                  No listings came back for this term. Try a more specific product name, like a brand and
+                  model.
+                </div>
+              )}
 
-                    if (isEditing) {
+              {s.status === "done" && s.results.length > 0 && (
+                <>
+                  {s.image && (
+                    <div style={styles.productImageWrap}>
+                      <img src={s.image} alt={s.term} style={styles.productImage} loading="lazy" />
+                    </div>
+                  )}
+
+                  <div style={styles.storeGrid}>
+                    {s.results.map((r) => {
+                      const color = STORE_COLORS[r.store] || "#9A9A9A";
+                      const isLowest = r.price === lowest;
                       return (
-                        <div key={r.name} style={styles.editCard}>
-                          <div style={styles.editCardTop}>
-                            <span style={{ ...styles.storeDot, background: r.color }} />
-                            <span style={styles.storeName}>{r.name}</span>
-                          </div>
-                          <input
-                            autoFocus
-                            style={styles.editInput}
-                            placeholder="Paste the exact product URL"
-                            value={editingValue}
-                            onChange={(e) => setEditingValue(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") saveLink(s.id, r.name);
-                              if (e.key === "Escape") cancelEditing();
-                            }}
-                          />
-                          <div style={styles.editCardBtns}>
-                            <button
-                              className="saveBtn"
-                              style={styles.saveBtn}
-                              onClick={() => saveLink(s.id, r.name)}
-                            >
-                              <Check size={13} /> Save
-                            </button>
-                            <button style={styles.cancelBtn} onClick={cancelEditing}>
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    }
-
-                    return (
-                      <div key={r.name} style={styles.storeCardWrap}>
                         <a
+                          key={r.store}
                           className="storeCard"
-                          style={{
-                            ...styles.storeCard,
-                            borderColor: exactLink ? r.color : "#EAEAEA",
-                            background: exactLink ? "#FFFDF9" : "#FFFFFF",
-                          }}
-                          href={exactLink || r.url(s.term)}
+                          style={{ ...styles.storeCard, borderColor: isLowest ? color : "#EAEAEA" }}
+                          href={r.link || "#"}
                           target="_blank"
                           rel="noopener noreferrer"
                         >
-                          <span style={{ ...styles.storeDot, background: r.color }} />
-                          <div style={styles.storeCardText}>
-                            <span style={styles.storeName}>{r.name}</span>
-                            {exactLink && <span style={styles.exactBadge}>Exact listing saved</span>}
+                          <div style={styles.storeCardTop}>
+                            <span style={{ ...styles.storeDot, background: color }} />
+                            <span style={styles.storeName}>{r.store}</span>
+                            <ExternalLink size={13} color="#9A9A9A" />
                           </div>
-                          <ExternalLink size={15} color="#9A9A9A" />
+                          <div style={styles.priceRow}>
+                            <span style={styles.price}>{r.priceLabel || formatINR(r.price)}</span>
+                            {isLowest && <span style={styles.lowestBadge}>Lowest</span>}
+                          </div>
+                          {r.title && <span style={styles.itemTitle}>{r.title}</span>}
+                          {r.delivery && <span style={styles.delivery}>{r.delivery}</span>}
                         </a>
-                        <div style={styles.cardActions}>
-                          <button
-                            className="editBtn"
-                            style={styles.editBtn}
-                            onClick={() => startEditing(s.id, r.name, exactLink)}
-                            aria-label={`Paste exact ${r.name} link for ${s.term}`}
-                          >
-                            {exactLink ? <Pencil size={12} /> : <Link2 size={12} />}
-                            {exactLink ? "Edit link" : "Paste exact link"}
-                          </button>
-                          {exactLink && (
-                            <button
-                              className="linkRemoveBtn"
-                              style={styles.linkRemoveBtn}
-                              onClick={() => removeLink(s.id, r.name)}
-                            >
-                              Remove
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-
-            <div style={styles.hint}>
-              Cards with no pasted link open that store's live search results. Once you paste a product's exact
-              URL, that card opens the specific listing instead — this tool can't fetch live prices, so you'll
-              still check the price on the actual page.
+                      );
+                    })}
+                  </div>
+                </>
+              )}
             </div>
-          </div>
-        )}
+          );
+        })}
 
         <div style={styles.footNote}>
-          This tool links to live retailer pages. It doesn't display prices directly, since that requires each
-          retailer's approved pricing API.
+          Listings are matched by store name, so the cheapest result for a store may be a different variant
+          or a third-party seller. Results are cached for 30 minutes to stay inside the SerpAPI search quota.
         </div>
       </main>
     </div>
@@ -375,8 +239,7 @@ export default function PriceCompareIndia() {
 
 const styles = {
   page: {
-    fontFamily:
-      "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
     background: "#FFFFFF",
     color: "#1A1A1A",
     minHeight: "100%",
@@ -390,16 +253,23 @@ const styles = {
     margin: "0 auto",
     display: "flex",
     flexDirection: "column",
-    gap: "0.35rem",
+    gap: "0.6rem",
   },
   logo: {
     fontSize: "1.25rem",
     fontWeight: 700,
   },
-  headerSub: {
-    fontSize: "0.8rem",
-    color: "#767676",
-    lineHeight: 1.5,
+  sourceBanner: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.45rem",
+    fontSize: "0.78rem",
+    color: "#5A6B7A",
+    background: "#F4F8FB",
+    border: "1px solid #DCE7F0",
+    borderRadius: 8,
+    padding: "0.55rem 0.8rem",
+    lineHeight: 1.4,
   },
   main: {
     maxWidth: 720,
@@ -440,8 +310,7 @@ const styles = {
     cursor: "pointer",
   },
   popularWrap: {
-    marginTop: "0.5rem",
-    marginBottom: "2rem",
+    marginBottom: "1rem",
   },
   popularLabel: {
     fontSize: "0.78rem",
@@ -462,56 +331,17 @@ const styles = {
     color: "#4A4A4A",
     cursor: "pointer",
   },
-  homesWrap: {
-    borderTop: "1px solid #EAEAEA",
-    paddingTop: "1.5rem",
-  },
-  homeGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
-    gap: "0.6rem",
-  },
-  homeLink: {
-    display: "flex",
-    alignItems: "center",
-    gap: "0.6rem",
-    border: "1px solid #EAEAEA",
-    borderRadius: 10,
-    padding: "0.75rem 0.9rem",
-    textDecoration: "none",
-    color: "#1A1A1A",
-  },
-  resultsWrap: {
-    borderTop: "1px solid #EAEAEA",
-    paddingTop: "1.5rem",
-  },
-  resultsTopBar: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: "1.25rem",
-  },
-  resultsCount: {
-    fontSize: "0.78rem",
-    color: "#9A9A9A",
-  },
-  clearBtn: {
-    border: "none",
-    background: "none",
-    color: "#9A9A9A",
-    fontSize: "0.78rem",
-    cursor: "pointer",
-    padding: 0,
-  },
   resultBlock: {
-    marginBottom: "1.75rem",
+    borderTop: "1px solid #EAEAEA",
+    paddingTop: "1.5rem",
+    marginBottom: "2rem",
   },
   resultHeader: {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
     fontSize: "0.95rem",
-    marginBottom: "0.75rem",
+    marginBottom: "1rem",
     color: "#4A4A4A",
   },
   removeBtn: {
@@ -526,36 +356,66 @@ const styles = {
     cursor: "pointer",
     flexShrink: 0,
   },
-  storeGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-    gap: "0.75rem",
-  },
-  storeCardWrap: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "0.3rem",
-  },
-  storeCard: {
+  stateBox: {
     display: "flex",
     alignItems: "center",
     gap: "0.6rem",
+    fontSize: "0.85rem",
+    color: "#6A6A6A",
+    border: "1px solid #EAEAEA",
+    borderRadius: 10,
+    padding: "1rem",
+    lineHeight: 1.5,
+  },
+  errorBox: {
+    borderColor: "#F2C9C4",
+    background: "#FDF5F4",
+    color: "#8E3B31",
+  },
+  retryBtn: {
+    border: "1px solid #E0D0CD",
+    borderRadius: 6,
+    background: "#FFFFFF",
+    color: "#8E3B31",
+    fontSize: "0.8rem",
+    fontWeight: 600,
+    padding: "0.35rem 0.7rem",
+    cursor: "pointer",
+    flexShrink: 0,
+  },
+  productImageWrap: {
+    width: "100%",
+    height: 220,
+    borderRadius: 10,
+    overflow: "hidden",
+    marginBottom: "1rem",
+    background: "#F5F5F5",
+  },
+  productImage: {
+    width: "100%",
+    height: "100%",
+    objectFit: "contain",
+    display: "block",
+  },
+  storeGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+    gap: "0.75rem",
+  },
+  storeCard: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "0.4rem",
     border: "1px solid #EAEAEA",
     borderRadius: 10,
     padding: "0.9rem 1rem",
     textDecoration: "none",
     color: "#1A1A1A",
   },
-  storeCardText: {
-    flex: 1,
+  storeCardTop: {
     display: "flex",
-    flexDirection: "column",
-    gap: "0.15rem",
-    minWidth: 0,
-  },
-  exactBadge: {
-    fontSize: "0.68rem",
-    color: "#767676",
+    alignItems: "center",
+    gap: "0.5rem",
   },
   storeDot: {
     width: 10,
@@ -564,90 +424,45 @@ const styles = {
     flexShrink: 0,
   },
   storeName: {
-    fontSize: "0.9rem",
+    flex: 1,
+    fontSize: "0.85rem",
     fontWeight: 600,
   },
-  cardActions: {
+  priceRow: {
     display: "flex",
     alignItems: "center",
-    gap: "0.7rem",
-    padding: "0 0.2rem",
+    gap: "0.5rem",
   },
-  editBtn: {
-    display: "flex",
-    alignItems: "center",
-    gap: "0.3rem",
-    border: "none",
-    background: "none",
-    color: "#9A9A9A",
-    fontSize: "0.72rem",
-    cursor: "pointer",
-    padding: "0.2rem 0.3rem",
+  price: {
+    fontSize: "1.05rem",
+    fontWeight: 700,
+  },
+  lowestBadge: {
+    fontSize: "0.65rem",
+    fontWeight: 700,
+    color: "#1A7A3C",
+    background: "#E7F7EC",
     borderRadius: 5,
+    padding: "0.15rem 0.4rem",
   },
-  linkRemoveBtn: {
-    border: "none",
-    background: "none",
-    color: "#B0B0B0",
+  itemTitle: {
+    fontSize: "0.75rem",
+    color: "#6A6A6A",
+    lineHeight: 1.35,
+    display: "-webkit-box",
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: "vertical",
+    overflow: "hidden",
+  },
+  delivery: {
     fontSize: "0.72rem",
-    cursor: "pointer",
-    padding: "0.2rem 0.3rem",
-  },
-  editCard: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "0.5rem",
-    border: "1px solid #1A1A1A",
-    borderRadius: 10,
-    padding: "0.8rem 0.9rem",
-  },
-  editCardTop: {
-    display: "flex",
-    alignItems: "center",
-    gap: "0.5rem",
-  },
-  editInput: {
-    border: "1px solid #E0E0E0",
-    borderRadius: 6,
-    padding: "0.45rem 0.6rem",
-    fontSize: "0.8rem",
-    outline: "none",
-    width: "100%",
-  },
-  editCardBtns: {
-    display: "flex",
-    gap: "0.5rem",
-  },
-  saveBtn: {
-    display: "flex",
-    alignItems: "center",
-    gap: "0.3rem",
-    border: "none",
-    borderRadius: 6,
-    background: "#1A1A1A",
-    color: "#FFFFFF",
-    fontSize: "0.75rem",
-    fontWeight: 600,
-    padding: "0.35rem 0.7rem",
-    cursor: "pointer",
-  },
-  cancelBtn: {
-    border: "none",
-    background: "none",
-    color: "#9A9A9A",
-    fontSize: "0.75rem",
-    cursor: "pointer",
-    padding: "0.35rem 0.4rem",
-  },
-  hint: {
-    marginTop: "0.5rem",
-    fontSize: "0.78rem",
     color: "#9A9A9A",
   },
   footNote: {
     fontSize: "0.75rem",
     color: "#9A9A9A",
     textAlign: "center",
-    padding: "2.5rem 0 0",
+    padding: "1rem 0 0",
+    lineHeight: 1.5,
   },
 };
