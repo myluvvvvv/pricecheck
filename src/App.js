@@ -1,4 +1,4 @@
-﻿import PriceCompareIndia from './PriceCompareIndia';
+import PriceCompareIndia from './PriceCompareIndia';
 
 function App() {
   return <PriceCompareIndia />;
